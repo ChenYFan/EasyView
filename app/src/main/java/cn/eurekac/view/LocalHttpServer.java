@@ -1,62 +1,34 @@
 package localserver;
 import fi.iki.elonen.NanoHTTPD;
-import fi.iki.elonen.NanoHTTPD.Response.Status;
 import java.io.IOException;
 import java.util.Map;
 import java.util.HashMap;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-
+import android.content.res.AssetManager;
+import android.util.Log;
 public class LocalHttpServer extends NanoHTTPD {
-    //在本地创建一个NANOHTTPD服务器
-    //端口随机，提供静态页面展示res/assets目录下的文件
-    //自动content-type识别
-    //自动路径补全：1.若路径为目录，则自动补全index.html 2.若路径为文件，且不存在该文件，则自动补全.html后缀 
-    //监听127.0.0.1，随机端口（若端口占用则尝试重新随机）完成启动后返回端口号
-
+    public AssetManager asset = null;
     private static final String TAG = "LocalHttpServer";
-    private static final String ASSETS_PATH = "src/main/res/assets";
     private static final String INDEX_FILE = "index.html";
     private static final String MIME_DEFAULT_BINARY = "application/octet-stream";
 
-
-    public LocalHttpServer() throws IOException {
-        super(0);
-    }
-
-    // @Override
-    // public Response serve(IHTTPSession session) {
-    //     String uri = session.getUri();
-    //     if (uri.equals("/")) {
-    //         uri = "/" + INDEX_FILE;
-    //     }
-    //     String filename = ASSETS_PATH + uri;
-    //     File file = new File(filename);
-    //     if (!file.exists()) {
-    //         filename = filename + ".html";
-    //         file = new File(filename);
-    //     }
-    //     if (!file.exists()) {
-    //         return newFixedLengthResponse(Status.NOT_FOUND, MIME_PLAINTEXT, "EurekacEasyView - File Not Found");
-    //     }
-    //     try {
-    //         FileInputStream fis = new FileInputStream(file);
-    //         return newFixedLengthResponse(Status.OK, getMimeTypeForFile(filename), fis, file.length());
-    //     } catch (FileNotFoundException e) {
-    //         return newFixedLengthResponse(Status.INTERNAL_ERROR, MIME_PLAINTEXT, "EurekacEasyView - Internal Error");
-    //     }
-
-    // }
-
-
-  
     @Override
     public Response serve(IHTTPSession session) {
-  //测试：直接返回html页面
-        String html = "<html><body><h1>Hello, World!</h1></body></html>";
-        return newFixedLengthResponse(html);
+        String uri = session.getUri();
+        if (uri.endsWith("/")) {
+            uri = INDEX_FILE;
+        }
+        return serveFile(uri);
     }
+
+
+    private Response serveFile(String uri) {
+        try {
+            return newChunkedResponse(Response.Status.OK, getMimeTypeForFile(uri), asset.open("www"+uri));
+        } catch (IOException e) {
+            return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Error 404, file not found.");
+        }
+    }
+
 
     public int getPort() {
         return super.getListeningPort();
@@ -96,14 +68,8 @@ public class LocalHttpServer extends NanoHTTPD {
     }
 
 
-    public static void main(String[] args) {
-        try {
-            LocalHttpServer server = new LocalHttpServer();
-            server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false);
-            System.out.println("Server started, listening on port: " + server.getPort());
-        } catch (IOException ioe) {
-            System.err.println("Couldn't start server:\n" + ioe);
-        }
+    public LocalHttpServer() throws IOException {
+        super("127.0.0.1",0);
     }
 
 

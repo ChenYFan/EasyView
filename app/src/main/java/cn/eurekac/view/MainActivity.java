@@ -1,6 +1,7 @@
 package cn.eurekac.easyview;
 
 import localserver.LocalHttpServer;
+
 import androidx.appcompat.app.AppCompatActivity;
 
 import android.annotation.SuppressLint;
@@ -11,22 +12,25 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+//Log
+import android.util.Log;
 
 public class MainActivity extends AppCompatActivity {
-
-    // private WebView webView = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // 设置为全屏（隐藏状态栏）
         requestWindowFeature(Window.FEATURE_NO_TITLE);
-        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        //getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         setContentView(R.layout.activity_main);
         try {
             LocalHttpServer server = new LocalHttpServer();
+            server.asset = getAssets();
+            server.start();
+
             int port = server.getPort();
+            Log.d("LocalHttpServer", "Server started at port " + port);
             this.createWebView(port);
         } catch (Exception e) {
             e.printStackTrace();
@@ -50,7 +54,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        String url = "http://127.0.0.1:" + port + "/";
+        String url = "http://127.0.0.1:" + port + "/index.html";
         webView.loadUrl(url);
     }
 
