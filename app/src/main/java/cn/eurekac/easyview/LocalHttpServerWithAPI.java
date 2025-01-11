@@ -1,23 +1,37 @@
 package cn.eurekac.easyview;
 
 import fi.iki.elonen.NanoWSD;
-import cn.eurekac.easyview.utils.fuckJSON;
+import cn.eurekac.easyview.src.fuckJSON;
+
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 
 import android.content.Context;
 import android.content.res.AssetManager;
+import android.webkit.WebView;
+
+import cn.eurekac.easyview.utils.CallBack;
 
 public class LocalHttpServerWithAPI extends NanoWSD {
+    private static CallBack MainActivityCallBacker = null;
     private Context contextUI = null;
-    private static EasyViewAPI easyViewAPI = null;
-    public AssetManager asset = null;
+    public EasyViewAPI easyViewAPI = null;
+    private AssetManager asset = null;
+    private WebView webView = null;
+    private Boolean goBackHooked = false;
+    private Boolean goBackAllowed = false;
+    private ApiWebSocket apiWebSocket = null;
     private static final String TAG = "LocalHttpServer";
     private static final String INDEX_FILE = "index.html";
     private static final String API_PREFIX = "/api/v1";
     private static final String MIME_DEFAULT_BINARY = "application/octet-stream";
+    private HashMap<String, WebSocket> webSockets = new HashMap<String, WebSocket>();
 
     @Override
     public Response serve(IHTTPSession session) {
@@ -36,13 +50,26 @@ public class LocalHttpServerWithAPI extends NanoWSD {
 
     @Override
     protected WebSocket openWebSocket(IHTTPSession handshakeRequest) {
-        return new ApiWebSocket(handshakeRequest);
+        System.out.println("WebSocket opened: " + handshakeRequest.getUri());
+        apiWebSocket = new ApiWebSocket(handshakeRequest);
+        apiWebSocket.setEasyViewAPI(easyViewAPI);
+        webSockets.put(handshakeRequest.getUri(), apiWebSocket);
+        return apiWebSocket;
     }
 
+
     private static class ApiWebSocket extends WebSocket {
+        private EasyViewAPI easyViewAPI = null;
 
         public ApiWebSocket(IHTTPSession handshakeRequest) {
             super(handshakeRequest);
+        }
+
+        public void setEasyViewAPI(EasyViewAPI easyViewAPI) {
+            this.easyViewAPI = easyViewAPI;
+        }
+        public EasyViewAPI getEasyViewAPI() {
+            return this.easyViewAPI;
         }
 
         @Override
@@ -50,31 +77,27 @@ public class LocalHttpServerWithAPI extends NanoWSD {
             String msg = message.getTextPayload();
             fuckJSON Req = new fuckJSON();
             Req.fromString(msg);
-
             String ReqID = Req.get("id").toString();
             String ReqAction = Req.get("action").toString();
             fuckJSON ReqData = (fuckJSON) Req.get("data");
             if (ReqData == null) {
                 ReqData = new fuckJSON();
             }
-            System.out.println("ReqID: " + ReqID);
-            System.out.println("ReqAction: " + ReqAction);
-            System.out.println("ReqData: " + ReqData.toString());
+//            System.out.println("ReqID: " + ReqID);
+//            System.out.println("ReqAction: " + ReqAction);
+//            System.out.println("ReqData: " + ReqData.toString());
             fuckJSON Res = new fuckJSON();
-
             Res.set("id", ReqID);
-            if (!easyViewAPI.isAPIExist(ReqAction)) {
+            if (this.easyViewAPI.isAPIExist(ReqAction)) {
+                Res.set("status", "success");
+                Res.set("msg", "API exist");
+                Res.set("data", this.easyViewAPI.excute(ReqAction, ReqData));
+            } else {
                 System.out.println("API " + ReqAction + " not exist");
                 Res.set("status", "error");
                 Res.set("msg", "API not exist");
-                Res.set("data", new Object());
-            } else {
-                System.out.println("API " + ReqAction + " exist");
-                Res.set("status", "success");
-                Res.set("msg", "API exist");
-                Res.set("data", easyViewAPI.excute(ReqAction, ReqData));
+                Res.set("data", new HashMap<String,Object>());
             }
-            System.out.println(Res.getString());
             try {
                 send(Res.getString());
             } catch (Exception e) {
@@ -150,11 +173,93 @@ public class LocalHttpServerWithAPI extends NanoWSD {
         return mime;
     }
 
+    public void setAsset(AssetManager asset) {
+        this.asset = asset;
+    }
 
-    public LocalHttpServerWithAPI(Context context) throws IOException {
+    public Boolean isGoBackHooked() {
+        return goBackHooked;
+    }
+
+    public Boolean isGoBackAllowed() {
+        return goBackAllowed;
+    }
+
+    public void setGoBackHooked(Boolean goBackHooked) {
+        this.goBackHooked = goBackHooked;
+    }
+
+    public void setGoBackAllowed(Boolean goBackAllowed) {
+        this.goBackAllowed = goBackAllowed;
+    }
+
+    private final ExecutorService executorService = Executors.newSingleThreadExecutor();
+
+    public void clearDeadWebSocket() {
+        List<String> deadKeys = new ArrayList<String>();
+        for (String key : webSockets.keySet()) {
+            WebSocket ws = webSockets.get(key);
+            if (!ws.isOpen()) {
+                deadKeys.add(key);
+            }
+        }
+        for (String key : deadKeys) {
+            webSockets.remove(key);
+        }
+    }
+
+    public void sendWebSocketMessage(WebSocket ws, fuckJSON message) {
+        executorService.submit(() -> {
+            try {
+                ws.send(message.getString());
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    public void broadCastWebSocket(fuckJSON data) {
+        if (webSockets.isEmpty()) {
+            System.out.println("No WebSocket connected");
+            return;
+        }
+        for (WebSocket ws : webSockets.values()) {
+            System.out.println(data.getString());
+            if (ws.isOpen()) sendWebSocketMessage(ws, data);
+        }
+        clearDeadWebSocket();
+    }
+
+
+    public void TryGoBackWithHook() {
+        fuckJSON data = new fuckJSON();
+        data.set("action", "SYSTEM$GO_BACK");
+        data.set("id", "BROADCAST");
+        fuckJSON innnerdata = new fuckJSON();
+        innnerdata.set("time", System.currentTimeMillis());
+        data.set("data", innnerdata);
+        broadCastWebSocket(data);
+    }
+
+    public LocalHttpServerWithAPI() throws IOException {
         super("127.0.0.1", 0);
-        contextUI = context;
-        easyViewAPI = new EasyViewAPI(contextUI);
+    }
+
+    public void setWebview(WebView webView) {
+        this.webView = webView;
+    }
+    public void setContextUI(Context context) {
+        this.contextUI = context;
+    }
+    public void setCallBacker(CallBack Callbacker) {
+        this.MainActivityCallBacker = Callbacker;
+    }
+    public void startEasyViewAPI() {
+        System.out.println("EasyView API Start");
+        easyViewAPI = new EasyViewAPI();
+        easyViewAPI.setContext(this.contextUI);
+        easyViewAPI.setCallBacker(this.MainActivityCallBacker);
+        easyViewAPI.setWebview(this.webView);
     }
 
 
